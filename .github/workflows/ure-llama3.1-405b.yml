@@ -1,0 +1,127 @@
+# ure-llama3.1-405b.yml
+
+name: ure llama3.1-405b
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  ure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker
+        uses: docker://$GITHUB_REPOSITORY_OWNER/opencog-deps
+        env:
+          CCACHE_DIR: /ws/ccache
+        run: |
+          useradd -m -s /bin/bash root
+          echo "root:root" | chpasswd
+
+      - name: Start restoring ccache
+        run: |
+          date +%d-%m-%Y > /tmp/date
+
+      - name: Restore ccache
+        uses: actions/cache@v2
+        id: ccache
+        with:
+          path: /ws/ccache
+          key: ccache-{{ checksum "/tmp/date" }}
+          restore-keys: |
+            ccache-
+
+      - name: Install CogUtil
+        run: |
+          git clone --depth 1 https://github.com/$GITHUB_REPOSITORY_OWNER/cogutil /ws/cogutil
+          mkdir -p /ws/cogutil/build
+          cd /ws/cogutil/build && cmake .. && make -j2 && make -j2 install
+          ldconfig
+
+      - name: Checkout AtomSpace
+        run: |
+          git clone --depth 1 https://github.com/$GITHUB_REPOSITORY_OWNER/atomspace /ws/atomspace
+
+      - name: Restore GHC Cache
+        uses: actions/cache@v2
+        id: ghc
+        with:
+          path: /root/.stack
+          key: ghc-{{checksum "/ws/atomspace/opencog/haskell/stack.yaml"}}-{{ runner.arch }}
+          restore-keys: |
+            ghc-
+
+      - name: Restore Haskell Deps Cache
+        uses: actions/cache@v2
+        id: haskelldeps
+        with:
+          path: /ws/atomspace/opencog/haskell/.stack-work
+          key: haskelldeps-{{checksum "/ws/atomspace/opencog/haskell/stack.yaml"}}-{{checksum "/ws/atomspace/opencog/haskell/opencog-atomspace.cabal"}}-{{ runner.arch }}
+          restore-keys: |
+            haskelldeps-
+
+      - name: Install AtomSpace
+        run: |
+          mkdir -p /ws/atomspace/build
+          cd /ws/atomspace/build && cmake .. && make -j2 && make -j2 install
+          ldconfig
+
+      - name: Save GHC Cache
+        uses: actions/cache@v2
+        with:
+          path: /root/.stack
+          key: ghc-{{checksum "/ws/atomspace/opencog/haskell/stack.yaml"}}-{{ runner.arch }}
+          cache-hit: ${{ steps.ghc.outputs.cache-hit }}
+
+      - name: Save Haskell Deps Cache
+        uses: actions/cache@v2
+        with:
+          path: /ws/atomspace/opencog/haskell/.stack-work
+          key: haskelldeps-{{checksum "/ws/atomspace/opencog/haskell/stack.yaml"}}-{{checksum "/ws/atomspace/opencog/haskell/opencog-atomspace.cabal"}}-{{ runner.arch }}
+          cache-hit: ${{ steps.haskelldeps.outputs.cache-hit }}
+
+      - name: Install Unify
+        run: |
+          git clone --depth 1 https://github.com/$GITHUB_REPOSITORY_OWNER/unify /ws/unify
+          mkdir -p /ws/unify/build
+          cd /ws/unify/build && cmake .. && make -j2 && make -j2 install
+          ldconfig
+
+      - name: Checkout URE
+        run: |
+          git clone --depth 1 https://github.com/$GITHUB_REPOSITORY_OWNER/ure /ws/ure
+
+      - name: CMake Configure
+        run: |
+          mkdir build && cd build && cmake ..
+
+      - name: Build
+        run: |
+          cd build && make -j2
+
+      - name: Build tests
+        run: |
+          cd build && make -j2 tests
+
+      - name: Run tests
+        run: |
+          cd build && make -j2 check ARGS=-j2
+
+      - name: Install URE
+        run: |
+          cd build && make -j2 install && ldconfig
+
+      - name: Print test log
+        run: |
+          cat build/tests/Testing/Temporary/LastTest.log
+        when: always
+
+      - name: Persist to workspace
+        uses: actions/upload-artifact@v2
+        with:
+          name: workspace
+          path: /ws/
