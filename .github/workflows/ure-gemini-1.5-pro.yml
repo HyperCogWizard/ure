@@ -1,0 +1,111 @@
+# ure-gemini-1.5-pro.yml
+
+name: ure gemini-1.5-pro
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  ure:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ github.repository_owner }}/opencog-deps
+      options: --user root
+      env:
+        CCACHE_DIR: /ws/ccache
+    defaults:
+      run:
+        working-directory: /ws/ure
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: /ws/ure # Checkout the main repo to /ws/ure
+
+      - name: Attach workspace
+        uses: actions/cache@v3
+        with:
+          path: /ws
+          key: ${{ runner.os }}-workspace-${{ hashFiles('/ws/ure/**') }} # Cache the entire workspace
+
+      - name: Start restoring ccache
+        run: date +%d-%m-%Y > /tmp/date
+
+      - name: Restore ccache
+        uses: actions/cache@v3
+        with:
+          path: /ws/ccache
+          key: ccache-${{ hashFiles('/tmp/date') }}
+          restore-keys: |
+            ccache-
+
+      - name: Install CogUtil
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/cogutil /ws/cogutil
+          mkdir -p /ws/cogutil/build
+          cd /ws/cogutil/build && cmake .. && make -j2 && make install
+          ldconfig
+
+      - name: Checkout AtomSpace
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/atomspace /ws/atomspace
+
+      - name: Restore GHC Cache
+        uses: actions/cache@v3
+        with:
+          path: /root/.stack
+          key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-ubuntu-${{ runner.arch }}
+          restore-keys: |
+            ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-ubuntu-
+
+      - name: Restore Haskell Deps Cache
+        uses: actions/cache@v3
+        with:
+          path: /ws/atomspace/opencog/haskell/.stack-work
+          key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-{{ hashFiles('/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-ubuntu-${{ runner.arch }}
+          restore-keys: |
+            haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-{{ hashFiles('/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-ubuntu-
+
+
+      - name: Install AtomSpace
+        run: |
+          mkdir -p /ws/atomspace/build
+          cd /ws/atomspace/build && cmake .. && make -j2 && make install
+          ldconfig
+
+      - name: Install Unify
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/unify /ws/unify
+          mkdir -p /ws/unify/build
+          cd /ws/unify/build && cmake .. && make -j2 && make install
+          ldconfig
+
+
+      - name: CMake Configure
+        run: mkdir build && cd build && cmake ..
+
+      - name: Build
+        run: cd build && make -j2
+
+      - name: Build tests
+        run: cd build && make -j2 tests
+
+      - name: Run tests
+        run: cd build && ctest -j2
+
+      - name: Install URE
+        run: cd build && make install && ldconfig
+
+      - name: Print test log
+        if: always()
+        run: cat build/tests/Testing/Temporary/LastTest.log
+
+      - name: Upload artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: build/tests/Testing/Temporary/LastTest.log
