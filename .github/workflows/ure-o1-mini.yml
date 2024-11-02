@@ -1,0 +1,163 @@
+# ure-o1-mini.yml
+
+### GitHub Actions Workflow (`.github/workflows/ure.yml`)
+
+name: ure o1-mini
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  # Define the CircleCI project username as a secret in GitHub Actions
+  CIRCLE_PROJECT_USERNAME: ${{ secrets.CIRCLE_PROJECT_USERNAME }}
+
+jobs:
+  ure:
+    runs-on: ubuntu-latest
+
+    # Use the specified Docker container
+    container:
+      image: ${{ env.CIRCLE_PROJECT_USERNAME }}/opencog-deps
+      options: --user root
+      env:
+        CCACHE_DIR: /ws/ccache
+
+    steps:
+      # 1. Checkout the primary repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          path: /ws/ure  # Sets the working directory to /ws/ure
+
+      # 2. Start restoring ccache by generating a date-based key
+      - name: Start Restoring Ccache
+        run: date +%d-%m-%Y > /tmp/date
+
+      # 3. Restore ccache using the generated date as part of the cache key
+      - name: Restore Ccache
+        id: restore-ccache
+        uses: actions/cache@v3
+        with:
+          path: /ws/ccache
+          key: ccache-$(date +%d-%m-%Y)
+          restore-keys: |
+            ccache-
+
+      # 4. Install CogUtil
+      - name: Install CogUtil
+        run: |
+          git clone --depth 1 https://github.com/${{ env.CIRCLE_PROJECT_USERNAME }}/cogutil /ws/cogutil
+          mkdir -p /ws/cogutil/build
+          cd /ws/cogutil/build
+          cmake ..
+          make -j2
+          make -j2 install
+          ldconfig
+
+      # 5. Checkout AtomSpace repository
+      - name: Checkout AtomSpace
+        run: git clone --depth 1 https://github.com/${{ env.CIRCLE_PROJECT_USERNAME }}/atomspace /ws/atomspace
+
+      # 6. Restore GHC Cache
+      - name: Restore GHC Cache
+        uses: actions/cache@v3
+        with:
+          path: /root/.stack
+          key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ runner.arch }}
+          restore-keys: |
+            ghc-
+
+      # 7. Restore Haskell Dependencies Cache
+      - name: Restore Haskell Deps Cache
+        uses: actions/cache@v3
+        with:
+          path: /ws/atomspace/opencog/haskell/.stack-work
+          key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ hashFiles('/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-${{ runner.arch }}
+          restore-keys: |
+            haskelldeps-
+
+      # 8. Install AtomSpace
+      - name: Install AtomSpace
+        run: |
+          mkdir -p /ws/atomspace/build
+          cd /ws/atomspace/build
+          cmake ..
+          make -j2
+          make -j2 install
+          ldconfig
+
+      # 9. Save GHC Cache
+      - name: Save GHC Cache
+        uses: actions/cache@v3
+        with:
+          path: /root/.stack
+          key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ runner.arch }}
+
+      # 10. Save Haskell Dependencies Cache
+      - name: Save Haskell Deps Cache
+        uses: actions/cache@v3
+        with:
+          path: /ws/atomspace/opencog/haskell/.stack-work
+          key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ hashFiles('/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-${{ runner.arch }}
+
+      # 11. Install Unify
+      - name: Install Unify
+        run: |
+          git clone --depth 1 https://github.com/${{ env.CIRCLE_PROJECT_USERNAME }}/unify /ws/unify
+          mkdir -p /ws/unify/build
+          cd /ws/unify/build
+          cmake ..
+          make -j2
+          make -j2 install
+          ldconfig
+
+      # 12. Configure CMake for URE
+      - name: CMake Configure
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+        working-directory: /ws/ure
+
+      # 13. Build URE
+      - name: Build URE
+        run: make -j2
+        working-directory: /ws/ure/build
+
+      # 14. Build Tests
+      - name: Build Tests
+        run: make -j2 tests
+        working-directory: /ws/ure/build
+
+      # 15. Run Tests
+      - name: Run Tests
+        run: make -j2 check ARGS=-j2
+        working-directory: /ws/ure/build
+
+      # 16. Install URE
+      - name: Install URE
+        run: |
+          make -j2 install
+          ldconfig
+        working-directory: /ws/ure/build
+
+      # 17. Print Test Log (always run, even if previous steps fail)
+      - name: Print Test Log
+        if: always()
+        run: cat build/tests/Testing/Temporary/LastTest.log
+        working-directory: /ws/ure/build
+
+      # 18. Persist Workspace Artifacts (similar to CircleCI workspace)
+      - name: Upload Workspace Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: workspace
+          path: |
+            /ws/cogutil
+            /ws/atomspace
+            /ws/unify
+            /ws/ure
+            /ws/ccache
