@@ -1,0 +1,108 @@
+# ure-grok-2.yml
+
+name: ure grok-2
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ure:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ github.repository_owner }}/opencog-deps
+      options: --user root
+    env:
+      CCACHE_DIR: /ws/ccache
+
+    steps:
+    # Setup workspace
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        path: /ws/ure
+
+    - name: Start restoring ccache
+      run: date +%d-%m-%Y > /tmp/date
+
+    - name: Cache ccache
+      uses: actions/cache@v2
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ hashFiles('/tmp/date') }}
+        restore-keys: |
+          ccache-
+
+    # Install CogUtil
+    - name: Install CogUtil
+      run: |
+        git clone --depth 1 https://github.com/${{ github.repository_owner }}/cogutil /ws/cogutil
+        mkdir -p /ws/cogutil/build
+        cd /ws/cogutil/build && cmake .. && make -j2 && make -j2 install
+        ldconfig
+
+    # Checkout AtomSpace
+    - name: Checkout AtomSpace
+      run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/atomspace /ws/atomspace
+
+    # Cache GHC and Haskell dependencies
+    - name: Cache GHC
+      uses: actions/cache@v2
+      with:
+        path: /root/.stack
+        key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ runner.arch }}
+
+    - name: Cache Haskell Deps
+      uses: actions/cache@v2
+      with:
+        path: /ws/atomspace/opencog/haskell/.stack-work
+        key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ hashFiles('/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-${{ runner.arch }}
+
+    # Install AtomSpace
+    - name: Install AtomSpace
+      run: |
+        mkdir -p /ws/atomspace/build
+        cd /ws/atomspace/build && cmake .. && make -j2 && make -j2 install
+        ldconfig
+
+    # Install Unify
+    - name: Install Unify
+      run: |
+        git clone --depth 1 https://github.com/${{ github.repository_owner }}/unify /ws/unify
+        mkdir -p /ws/unify/build
+        cd /ws/unify/build && cmake .. && make -j2 && make -j2 install
+        ldconfig
+
+    # Build and Test URE
+    - name: CMake Configure
+      run: mkdir build && cd build && cmake ..
+
+    - name: Build
+      run: cd build && make -j2
+
+    - name: Build tests
+      run: cd build && make -j2 tests
+
+    - name: Run tests
+      run: cd build && make -j2 check ARGS=-j2
+
+    - name: Install URE
+      run: cd build && make -j2 install && ldconfig
+
+    - name: Print test log
+      if: always()
+      run: cat build/tests/Testing/Temporary/LastTest.log
+
+    # Persist workspace (GitHub Actions does not have a direct equivalent, but you can use upload-artifact)
+    - name: Upload workspace
+      uses: actions/upload-artifact@v2
+      with:
+        name: workspace
+        path: |
+          /ws/cogutil
+          /ws/atomspace
+          /ws/unify
+          /ws/ure
+          /ws/ccache
