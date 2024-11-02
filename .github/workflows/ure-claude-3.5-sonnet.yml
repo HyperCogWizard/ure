@@ -1,0 +1,104 @@
+# ure-claude-3.5-sonnet.yml
+
+name: ure claude-3.5-sonnet
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ github.repository_owner }}/opencog-deps
+      options: --user root
+
+    env:
+      CCACHE_DIR: /ws/ccache
+
+    defaults:
+      run:
+        working-directory: /ws/ure
+
+    steps:
+      - name: Create workspace
+        run: mkdir -p /ws
+
+      - name: Setup ccache date
+        run: date +%d-%m-%Y > /tmp/date
+
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: /ws/ccache
+          key: ccache-${{ hashFiles('/tmp/date') }}
+          restore-keys: |
+            ccache-
+
+      - name: Install CogUtil
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/cogutil /ws/cogutil
+          mkdir -p /ws/cogutil/build
+          cd /ws/cogutil/build && cmake .. && make -j2 && make -j2 install
+          ldconfig
+
+      - name: Checkout AtomSpace
+        run: git clone --depth 1 https://github.com/${{ github.repository_owner }}/atomspace /ws/atomspace
+
+      - name: Cache GHC
+        uses: actions/cache@v3
+        with:
+          path: /root/.stack
+          key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ runner.arch }}
+
+      - name: Cache Haskell Dependencies
+        uses: actions/cache@v3
+        with:
+          path: /ws/atomspace/opencog/haskell/.stack-work
+          key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ hashFiles('/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-${{ runner.arch }}
+
+      - name: Install AtomSpace
+        run: |
+          mkdir -p /ws/atomspace/build
+          cd /ws/atomspace/build && cmake .. && make -j2 && make -j2 install
+          ldconfig
+
+      - name: Install Unify
+        run: |
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/unify /ws/unify
+          mkdir -p /ws/unify/build
+          cd /ws/unify/build && cmake .. && make -j2 && make -j2 install
+          ldconfig
+
+      - name: Checkout URE
+        uses: actions/checkout@v3
+        with:
+          path: /ws/ure
+
+      - name: CMake Configure
+        run: mkdir build && cd build && cmake ..
+
+      - name: Build
+        run: cd build && make -j2
+
+      - name: Build tests
+        run: cd build && make -j2 tests
+
+      - name: Run tests
+        run: cd build && make -j2 check ARGS=-j2
+
+      - name: Install URE
+        run: cd build && make -j2 install && ldconfig
+
+      - name: Print test log
+        if: always()
+        run: cat build/tests/Testing/Temporary/LastTest.log
+
+      - name: Upload workspace artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: workspace
+          path: |
+            /ws/cogutil
+            /ws/atomspace
+            /ws/unify
+            /ws/ure
+            /ws/ccache
