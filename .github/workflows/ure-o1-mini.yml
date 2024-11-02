@@ -12,7 +12,8 @@ on:
 
 env:
   # Define the CircleCI project username as a secret in GitHub Actions
-  CIRCLE_PROJECT_USERNAME: ${{ secrets.CIRCLE_PROJECT_USERNAME }}
+#  CIRCLE_PROJECT_USERNAME: ${{ secrets.CIRCLE_PROJECT_USERNAME }}
+  CIRCLE_PROJECT_USERNAME: opencog
 
 jobs:
   ure:
