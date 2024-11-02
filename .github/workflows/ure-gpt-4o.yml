@@ -1,0 +1,102 @@
+# ure-gpt-4o.yml
+
+name: ure gpt-4o
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: /ws/ccache
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Docker
+      uses: docker/setup-buildx-action@v1
+
+    - name: Start restoring ccache
+      run: echo $(date +%d-%m-%Y) > /tmp/date
+
+    - name: Restore ccache
+      uses: actions/cache@v2
+      with:
+        path: /ws/ccache
+        key: ccache-${{ hashFiles('/tmp/date') }}
+        restore-keys: |
+          ccache-
+
+    - name: Install CogUtil
+      run: |
+        git clone --depth 1 https://github.com/${{ github.actor }}/cogutil /ws/cogutil
+        mkdir -p /ws/cogutil/build
+        cd /ws/cogutil/build && cmake .. && make -j2 && make -j2 install
+        ldconfig
+
+    - name: Checkout AtomSpace
+      run: git clone --depth 1 https://github.com/${{ github.actor }}/atomspace /ws/atomspace
+
+    - name: Restore GHC Cache
+      uses: actions/cache@v2
+      with:
+        path: /root/.stack
+        key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ runner.os }}
+
+    - name: Restore Haskell Deps Cache
+      uses: actions/cache@v2
+      with:
+        path: /ws/atomspace/opencog/haskell/.stack-work
+        key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml', '/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-${{ runner.os }}
+
+    - name: Install AtomSpace
+      run: |
+        mkdir -p /ws/atomspace/build
+        cd /ws/atomspace/build && cmake .. && make -j2 && make -j2 install
+        ldconfig
+
+    - name: Save GHC Cache
+      uses: actions/cache@v2
+      with:
+        path: /root/.stack
+        key: ghc-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml') }}-${{ runner.os }}
+
+    - name: Save Haskell Deps Cache
+      uses: actions/cache@v2
+      with:
+        path: /ws/atomspace/opencog/haskell/.stack-work
+        key: haskelldeps-${{ hashFiles('/ws/atomspace/opencog/haskell/stack.yaml', '/ws/atomspace/opencog/haskell/opencog-atomspace.cabal') }}-${{ runner.os }}
+
+    - name: Install Unify
+      run: |
+        git clone --depth 1 https://github.com/${{ github.actor }}/unify /ws/unify
+        mkdir -p /ws/unify/build
+        cd /ws/unify/build && cmake .. && make -j2 && make -j2 install
+        ldconfig
+
+    - name: CMake Configure
+      run: mkdir build && cd build && cmake ..
+
+    - name: Build
+      run: cd build && make -j2
+
+    - name: Build tests
+      run: cd build && make -j2 tests
+
+    - name: Run tests
+      run: cd build && make -j2 check ARGS=-j2
+
+    - name: Install URE
+      run: cd build && make -j2 install && ldconfig
+
+    - name: Print test log
+      if: always()
+      run: cat build/tests/Testing/Temporary/LastTest.log
+
